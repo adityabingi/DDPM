@@ -5,7 +5,7 @@ import math
 
 class Swish(nn.Module):
         
-    def forward(x):
+    def forward(self, x):
         return x * torch.sigmoid(x)
 
 class TimeEmbedding(nn.Module):
@@ -24,7 +24,7 @@ class TimeEmbedding(nn.Module):
         emb = emb.view(max_len, d_model)
         
         self.time_embedding = nn.Sequential(
-                                 nn.embedding.from_pretrained(emb),
+                                 nn.Embedding.from_pretrained(emb),
                                  nn.Linear(d_model, hid_dim),
                                  Swish(),
                                  nn.Linear(hid_dim, hid_dim)
@@ -74,22 +74,22 @@ class AttnBlock(nn.Module):
         
     def forward(self, x):
         
-        b, c, h, w = x.shape
+        B, C, H, W = x.shape
         h = self.group_norm(x)
         q = self.q(h)
         k = self.k(h)
         v = self.v(h)
         
-        q = q.permute(0, 2,3, 1).view(b, h*w, c)
-        k = k.view(b, c, h*w)
-        attn_w = torch.bmm(q, k) * (int(c)**(-0.5))
-        assert w.shape == (b, h*w, h*w)
-        w = F.softmax(w, dim=-1)
+        q = q.permute(0, 2,3, 1).contiguous().view(B, H*W, C)
+        k = k.view(B, C, H*W)
+        attn_w = torch.bmm(q, k) * (int(C)**(-0.5))
+        assert attn_w.shape == (B, H*W, H*W)
+        attn_w = F.softmax(attn_w, dim=-1)
         
-        v = v.permute(0, 2, 3, 1).view(b, h*w, c)
+        v = v.permute(0, 2, 3, 1).contiguous().view(B, H*W, C)
         h = torch.bmm(attn_w, v)
-        assert x.shape == (b, h*w, c)
-        h = h.view(b, h, w, c).permute(0, 3, 1, 2)
+        assert h.shape == (B, H*W, C)
+        h = h.view(B, H, W, C).permute(0, 3, 1, 2).contiguous()
         
         h = self.proj(h)
         
@@ -106,7 +106,7 @@ class ResBlock(nn.Module):
         self.block1 = nn.Sequential(
                              nn.GroupNorm(32, in_ch),
                              Swish(),
-                             nn.Conv2d(in_ch, out_ch, kernel_size=3, stride=1, padding=0))
+                             nn.Conv2d(in_ch, out_ch, kernel_size=3, stride=1, padding=1))
         
         self.temb_proj = nn.Sequential(
                              Swish(),
@@ -116,7 +116,7 @@ class ResBlock(nn.Module):
                              nn.GroupNorm(32, out_ch),
                              Swish(),
                              nn.Dropout(dropout),
-                             nn.Conv2d(out_ch, out_ch, kernel_size=3, stride=1, padding=0)
+                             nn.Conv2d(out_ch, out_ch, kernel_size=3, stride=1, padding=1)
         )
         
         if in_ch != out_ch:
@@ -124,7 +124,7 @@ class ResBlock(nn.Module):
         else:
             self.shortcut = nn.Identity()
         if attn:
-            self.attn = AttnBlock()
+            self.attn = AttnBlock(out_ch)
         else:
             self.attn = nn.Identity()     
     
@@ -140,13 +140,13 @@ class ResBlock(nn.Module):
     
 class UNet(nn.Module):
     
-    def __init__(self, ch, ch_mult=[1,2,2,2], attn=[1], num_res_blocks=2, dropout=0.1):
+    def __init__(self, ch=128, ch_mult=[1,2,2,2], attn=[1], num_res_blocks=2, dropout=0.1):
         super().__init__()
         
         assert all([i < len(ch_mult) for i in attn]), "attn index out of bound"
 
         tdim = ch * 4
-        self.time_embedding = TimeEmbedding(max_len=1000, d_model=ch, dim=tdim)
+        self.time_embedding = TimeEmbedding(max_len=1000, d_model=ch, hid_dim=tdim)
 
         self.head = nn.Conv2d(3, ch, kernel_size=3, stride=1, padding=1)
         self.downblocks = nn.ModuleList()
@@ -180,7 +180,7 @@ class UNet(nn.Module):
             out_ch = ch * mult
             for _ in range(num_res_blocks + 1):
                 self.upblocks.append(ResBlock(
-                    in_ch=cxs.pop() + cur_ch, out_ch=out_ch, tdim=tdim,
+                    in_ch = cxs.pop() + cur_ch, out_ch=out_ch, tdim=tdim,
                     dropout=dropout, attn=(i in attn)))
                 cur_ch = out_ch
             if i != 0:
