@@ -9,16 +9,23 @@ class CelebADataset(Dataset):
         
         self.ds = CelebA(root=data_dir, split=split, download=True)
         
-        self.img_size = img_size
+        self.resolution = img_size[1:2]
+        self.channels = img_size[0]
         transforms = [
                         v2.RandomHorizontalFlip(),
+                        v2.Resize(self.resolution),
                         v2.ToTensor(),
                         v2.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
                      ]
         if not hflip:
             transforms = transforms[1:]
             
+        transforms = [self.crop_celeba] + transforms
+            
         self.transform = v2.Compose(transforms)
+        
+    def crop_celeba(self, img):
+        return v2.functional.crop(img, top=40, left=15, height=148, width=148)    
         
     def __len__(self):
         return len(self.ds)
@@ -45,8 +52,7 @@ def get_dataloader(data_dir, img_size, batch_size, num_workers, rank, world_size
         persistent_workers=True,
         num_workers=num_workers,
     )
-   
     
-    return dl, sampler
+    return dl
     
     
