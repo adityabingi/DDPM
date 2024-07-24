@@ -13,7 +13,7 @@ def extract(v, t, x_shape):
 
 class DDPM(nn.Module):
     
-    def __init__(self, model, device, beta_start, beta_end, timesteps=1000):
+    def __init__(self, model, device, beta_start=0.0001, beta_end=0.02, timesteps=1000):
         super().__init__()
         
         self.model = model
@@ -52,17 +52,35 @@ class DDPM(nn.Module):
         t = torch.randint(self.num_timesteps, size=(x_0.shape[0], ), device=self.device)
         x_t, noise = self.q_sample(x_0, t)
         noise_pred = self.model(x_t, t)
-        loss = F.mse(noise_pred, noise)
+        loss = F.mse_loss(noise_pred, noise)
         return loss
     
     @torch.inference_mode
     def p_sample(self, x_t, t):
         
-        eps = torch.randn_like(x_t)
-        eps_theta = self.model(x_t, t)
-        mean = extract(self.coeff1, t, x_t.shape) * x_t - extract(self.coeff2, t, x_t.shape) * eps_theta
         
-        sample = mean + torch.sqrt(self.betas) * eps
+        noise = torch.randn_like(x_t) if t>0 else torch.zeros_like(x_t)
+        
+        t = torch.full(
+            size=(x_t.shape[0],),
+            fill_value=t,
+            dtype=torch.long,
+            device=self.device,
+        )   
+        eps_theta = self.model(x_t, t)
+        mean = extract(self.coeff1, t, x_t.shape) * (x_t - extract(self.coeff2, t, x_t.shape) * eps_theta)
+        
+        sample = mean + extract(torch.sqrt(self.betas), t, x_t.shape) * noise
         
         return sample
-
+    
+    @torch.inference_mode
+    def sample(self, shape):
+        
+        x_t = torch.randn(shape)
+        
+        for t in reversed(range(self.num_timesteps)):
+            x_t = self.p_sample(x_t, t)
+            
+        return x_t
+            
