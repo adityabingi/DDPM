@@ -3,7 +3,6 @@ from torch.optim import AdamW
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
-import argparse
 import math
 import time
 #from timm.scheduler import CosineLRScheduler
@@ -20,6 +19,7 @@ from pathlib import Path
 
 # import torch._dynamo
 # torch._dynamo.config.suppress_errors = True
+torch.set_float32_matmul_precision('high')
 
 
 
@@ -74,14 +74,19 @@ class Trainer:
     def train(self):
         
         start_time = time.time()
-        self.model = torch.compile(self.model)
+        self.model = torch.compile(self.model, backend="inductor")
+        
+        self.model.train()
         
         #self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optim, len(self.train_dl), )
-        min_val_loss = -math.inf
+        min_val_loss = math.inf
         for epoch in range(1, Config.num_epochs+1):
             
             train_loss = self.train_one_epoch(epoch)
+            
+            self.model.eval()
             val_loss = self.validate()
+            
             
             if val_loss < min_val_loss and self.rank==0:
                 min_val_loss = val_loss
@@ -89,7 +94,8 @@ class Trainer:
             self.save_ckpt(min_val_loss, epoch)
                     
             self.test_samples(epoch=epoch, test_batch_size=16)
-                    
+            
+            self.model.train()     
             
             if self.rank == 0:
                 
@@ -111,9 +117,7 @@ class Trainer:
         if self.rank == 0:
             gen_image = self.model.module.sample(shape=[test_batch_size,] + Config.img_size)
             gen_grid = image_to_grid(gen_image, n_cols=int(test_batch_size ** 0.5))
-            sample_path = str(
-                self.log_dir/self.run.name/f"sample_imgs/sample-epoch={epoch}.jpg"
-            )
+            sample_path = self.log_dir + self.run.name + f"/sample_imgs/sample-epoch={epoch}.jpg"
             save_image(gen_grid, save_path=sample_path)
             wandb.log({"Samples": wandb.Image(sample_path)}, step=epoch)
    
@@ -154,7 +158,8 @@ def main_worker(rank, world_size, run):
     ddpm = DDPM(unet, device=DEVICE).to(DEVICE)
     
     if "cuda" in str(DEVICE):
-        ddpm = DDP(ddpm, device_ids=[rank])
+        ddpm = DDP(ddpm, device_ids=[rank], find_unused_parameters=True)
+        print("Distributed data parallel activated")
     else:
         ddpm = DDP(ddpm)
     optim = AdamW(ddpm.parameters(), lr=Config.lr)
@@ -168,7 +173,7 @@ def main_worker(rank, world_size, run):
 def setup(rank, world_size, port):
 
     # initialize the process group
-    dist.init_process_group("gloo", init_method=f"tcp://localhost:{port}", rank=rank, world_size=world_size)
+    dist.init_process_group("nccl", init_method=f"tcp://localhost:{port}", rank=rank, world_size=world_size)
 
 def cleanup():
     dist.destroy_process_group()
@@ -185,6 +190,7 @@ def main():
     run = wandb.init(project="DDPM_prototype")
     if torch.cuda.is_available():
         world_size = torch.cuda.device_count()
+        print(f"Cuda count {world_size}")
     else:
         world_size=1
     mp.spawn(

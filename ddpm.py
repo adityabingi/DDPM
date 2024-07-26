@@ -8,7 +8,7 @@ def extract(v, t, x_shape):
     [batch_size, 1, 1, 1, 1, ...] for broadcasting purposes.
     """
     device = t.device
-    out = torch.gather(v, index=t, dim=0).float().to(device)
+    out = torch.gather(v, index=t, dim=0).float().to(device).contiguous()
     return out.view([t.shape[0]] + [1] * (len(x_shape) - 1))
 
 class DDPM(nn.Module):
@@ -41,7 +41,7 @@ class DDPM(nn.Module):
     
     def q_sample(self, x_0, t):
         
-        noise = torch.randn_like(x_0)
+        noise = torch.randn_like(x_0).to(self.device)
         
         x_t = extract(self.sqrt_alphas_bar, t, x_0.shape) * x_0 + extract(self.sqrt_oneminus_alphas_bar, t, x_0.shape) * noise
         
@@ -60,6 +60,7 @@ class DDPM(nn.Module):
         
         
         noise = torch.randn_like(x_t) if t>0 else torch.zeros_like(x_t)
+        noise = noise.to(self.device)
         
         t = torch.full(
             size=(x_t.shape[0],),
@@ -77,10 +78,12 @@ class DDPM(nn.Module):
     @torch.inference_mode
     def sample(self, shape):
         
-        x_t = torch.randn(shape)
+        x_t = torch.randn(shape).to(self.device)
         
         for t in reversed(range(self.num_timesteps)):
             x_t = self.p_sample(x_t, t)
             
         return x_t
+    
+
             

@@ -17,7 +17,7 @@ class TimeEmbedding(nn.Module):
         emb = torch.arange(0, d_model, step=2) / d_model * math.log(10000)
         emb = torch.exp(-emb)
         pos = torch.arange(max_len).float()
-        emb = pos[:, None] * emb[None, :]
+        emb = pos[:, None].contiguous() * emb[None, :].contiguous()
         assert list(emb.shape) == [max_len, d_model // 2]
         emb = torch.stack([torch.sin(emb), torch.cos(emb)], dim=-1)
         assert list(emb.shape) == [max_len, d_model // 2, 2]
@@ -80,7 +80,7 @@ class AttnBlock(nn.Module):
         k = self.k(h)
         v = self.v(h)
         
-        q = q.permute(0, 2,3, 1).contiguous().view(B, H*W, C)
+        q = q.permute(0, 2, 3, 1).contiguous().view(B, H*W, C)
         k = k.view(B, C, H*W)
         attn_w = torch.bmm(q, k) * (int(C)**(-0.5))
         assert attn_w.shape == (B, H*W, H*W)
@@ -132,7 +132,7 @@ class ResBlock(nn.Module):
     def forward(self, x, temb):
         
         h = self.block1(x)
-        h = h + self.temb_proj(temb)[:, :, None, None]
+        h = h + (self.temb_proj(temb)[:, :, None, None].contiguous())
         h = self.block2(h)
         h = h + self.shortcut(x)
         h = self.attn(h) 
