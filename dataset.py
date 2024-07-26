@@ -7,7 +7,7 @@ class CelebADataset(Dataset):
     
     def __init__(self, data_dir, split, img_size, hflip=False):
         
-        self.ds = CelebA(root=data_dir, split=split, download=True)
+        self.ds = CelebA(root=data_dir, split=split, download=False)
         
         self.resolution = img_size[1:2]
         self.channels = img_size[0]

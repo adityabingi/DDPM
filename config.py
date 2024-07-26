@@ -8,11 +8,11 @@ class Config:
     warmup_steps = ""
     
     # Data Params
-    data_dir = "/home/adithya/celeba/"
+    data_dir = "celeba/"
     img_size = [3, 64, 64]    # [C, H, W]
     
     # data loader worker threads
-    num_workers = 3
+    num_workers = 8
 
     # diffusion params
     diffusion_timesteps = 1000
