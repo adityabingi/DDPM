@@ -62,3 +62,10 @@ def image_to_grid(image, n_cols):
     grid = TF.to_pil_image(grid)
     return grid
 
+def modify_state_dict(state_dict):
+    new_state_dict = OrderedDict()
+    for key, value in state_dict.items():
+        new_key = key.replace("_orig_mod.module.", "")
+        new_state_dict[new_key] = value
+    return new_state_dict
+        
